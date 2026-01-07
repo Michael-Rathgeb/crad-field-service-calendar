@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, X, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
+import { db } from './firebase';
+import { collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 
 const EMPLOYEES = [
   { id: 'mike', name: 'Mike', title: 'Field Service Engineer', color: 'bg-blue-500' },
@@ -64,38 +66,41 @@ const FieldServiceCalendar = () => {
     tentative: false
   });
 
-  // Load events from localStorage with migration
+  // Load events from Firestore with real-time updates
   useEffect(() => {
-    const saved = localStorage.getItem('crad-events');
-    if (saved) {
-      const parsedEvents = JSON.parse(saved);
-      // Migrate old events
-      const migratedEvents = parsedEvents.map(event => {
-        let migrated = { ...event };
-        // Migrate single 'date' field to startDate/endDate
-        if (event.date && !event.startDate) {
-          migrated.startDate = event.date;
-          migrated.endDate = event.date;
-          delete migrated.date;
-        }
-        // Migrate single 'eventType' to 'eventTypes' array
-        if (event.eventType && !event.eventTypes) {
-          migrated.eventTypes = [event.eventType];
-          delete migrated.eventType;
-        }
-        return migrated;
-      });
-      setEvents(migratedEvents);
-    }
-    setIsInitialized(true);
+    const unsubscribe = onSnapshot(collection(db, 'events'), (snapshot) => {
+      const loadedEvents = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setEvents(loadedEvents);
+      setIsInitialized(true);
+    }, (error) => {
+      console.error('Error loading events:', error);
+      setIsInitialized(true);
+    });
+
+    // Cleanup subscription on unmount
+    return () => unsubscribe();
   }, []);
 
-  // Save events to localStorage (only after initial load)
-  useEffect(() => {
-    if (isInitialized) {
-      localStorage.setItem('crad-events', JSON.stringify(events));
+  // Save event to Firestore
+  const saveEventToFirestore = async (event) => {
+    try {
+      await setDoc(doc(db, 'events', String(event.id)), event);
+    } catch (error) {
+      console.error('Error saving event:', error);
     }
-  }, [events, isInitialized]);
+  };
+
+  // Delete event from Firestore
+  const deleteEventFromFirestore = async (eventId) => {
+    try {
+      await deleteDoc(doc(db, 'events', String(eventId)));
+    } catch (error) {
+      console.error('Error deleting event:', error);
+    }
+  };
 
   // Date utility functions
   const formatDate = (date) => {
@@ -294,10 +299,12 @@ const FieldServiceCalendar = () => {
 
     if (editingEventId) {
       // Update existing event
-      setEvents(events.map(e => e.id === editingEventId ? { ...newEvent, id: editingEventId } : e));
+      const updatedEvent = { ...newEvent, id: editingEventId };
+      saveEventToFirestore(updatedEvent);
     } else {
       // Add new event
-      setEvents([...events, { ...newEvent, id: Date.now() }]);
+      const eventWithId = { ...newEvent, id: Date.now() };
+      saveEventToFirestore(eventWithId);
     }
 
     setShowModal(false);
@@ -335,7 +342,7 @@ const FieldServiceCalendar = () => {
   };
 
   const handleDeleteEvent = (eventId) => {
-    setEvents(events.filter(e => e.id !== eventId));
+    deleteEventFromFirestore(eventId);
   };
 
   const toggleProduct = (product) => {
