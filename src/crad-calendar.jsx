@@ -928,7 +928,7 @@ const FieldServiceCalendar = () => {
         <div className="bg-white rounded-lg shadow-sm p-1 md:p-2">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-1">
             <div className="flex items-center">
-              <img src="/c_rad.png" alt="C-rad Logo" className="h-32 w-auto -my-10" />
+              <img src={import.meta.env.BASE_URL + "c_rad.png"} alt="C-rad Logo" className="h-32 w-auto -my-10" />
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
