@@ -568,10 +568,11 @@ const FieldServiceCalendar = () => {
                             borderRadius: `${spanInfo.isStart ? '6px' : '0'} ${spanInfo.isEnd ? '6px' : '0'} ${spanInfo.isEnd ? '6px' : '0'} ${spanInfo.isStart ? '6px' : '0'}`
                           }}
                           onClick={() => setSelectedEvent(event)}
-                          title={`${getEventLabel(event)}${event.location ? ` @ ${event.location}` : ''}`}
+                          title={`${getEventLabel(event)}${event.location ? ` @ ${event.location}` : ''}${event.notes ? ` - ${event.notes}` : ''}`}
                         >
                           <div className="text-xs font-semibold truncate">{getEventShortLabel(event)}</div>
                           {eventHeight > 45 && event.location && <div className="text-xs text-gray-600 truncate">{event.location}</div>}
+                          {eventHeight > 60 && event.notes && <div className="text-xs text-gray-500 truncate italic">{event.notes}</div>}
                         </div>
                       );
                     })}
@@ -787,10 +788,14 @@ const FieldServiceCalendar = () => {
                             zIndex: 10
                           }}
                           onClick={() => setSelectedEvent(event)}
+                          title={event.notes ? `${getEventShortLabel(event)} - ${event.notes}` : getEventShortLabel(event)}
                         >
                           <div className="flex items-center gap-1.5 h-full">
                             <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${getEmployeeColor(event.employee)}`} />
-                            <span className="truncate font-medium">{getEventShortLabel(event)}</span>
+                            <span className="truncate font-medium">
+                              {getEventShortLabel(event)}
+                              {event.notes && <span className="font-normal text-gray-600 ml-1">- {event.notes}</span>}
+                            </span>
                           </div>
                         </div>
                       );
