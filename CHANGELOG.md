@@ -1,5 +1,38 @@
 # CRAD Field Service Calendar - Changelog
 
+## Version 1.1.0 (January 8, 2026)
+
+### New Views
+- **2-Month View**: Compact 8-week view with color-only event bars
+  - Employee rows with drag handle for visual organization
+  - Starts from Monday of current week
+  - Event type color legend at bottom
+  - Weekend columns shaded for visibility
+
+### Employee Management
+- **Team Management Modal**: Password-protected admin interface (password: `crad2026`)
+  - Add new employees with name, title, and color
+  - Edit existing employee details
+  - Delete employees (with confirmation)
+  - Drag-and-drop reordering of employee list
+- **Employees in Firestore**: Employee data now synced to cloud
+  - Real-time sync across all users
+  - Custom sort order persisted
+- **Cyber Robotics**: Added as new team member (Partner)
+
+### Filter Improvements
+- **Multi-Select Employee Filter**: Checkbox-based filtering
+  - Select All / Clear All buttons
+  - Toggle individual employees on/off
+  - Color-coded chips with employee colors
+  - Visual feedback for selected/unselected state
+
+### Other Improvements
+- **Notes on Events**: Notes now display directly on calendar events
+- **Improved Tooltips**: Full event details on hover including notes
+
+---
+
 ## Version 1.0.0 (January 7, 2026)
 
 ### Core Features
