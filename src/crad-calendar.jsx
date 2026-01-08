@@ -1,14 +1,33 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, X, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, X, Filter, ChevronLeft, ChevronRight, Settings, Trash2, GripVertical } from 'lucide-react';
 import { db } from './firebase';
 import { collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 
-const EMPLOYEES = [
+// Default employees (used for initial setup)
+const DEFAULT_EMPLOYEES = [
   { id: 'mike', name: 'Mike', title: 'Field Service Engineer', color: 'bg-blue-500' },
   { id: 'jordan', name: 'Jordan', title: 'Senior Field Service Engineer', color: 'bg-green-500' },
   { id: 'febin', name: 'Febin', title: 'Field Service Engineer', color: 'bg-purple-500' },
-  { id: 'peter', name: 'Peter', title: 'Field Service Manager', color: 'bg-orange-500' }
+  { id: 'peter', name: 'Peter', title: 'Field Service Manager', color: 'bg-orange-500' },
+  { id: 'cyber-robotics', name: 'Cyber Robotics', title: 'Partner', color: 'bg-rose-500' }
 ];
+
+// Available colors for employees
+const EMPLOYEE_COLORS = [
+  { name: 'Blue', value: 'bg-blue-500' },
+  { name: 'Green', value: 'bg-green-500' },
+  { name: 'Purple', value: 'bg-purple-500' },
+  { name: 'Orange', value: 'bg-orange-500' },
+  { name: 'Rose', value: 'bg-rose-500' },
+  { name: 'Teal', value: 'bg-teal-500' },
+  { name: 'Indigo', value: 'bg-indigo-500' },
+  { name: 'Amber', value: 'bg-amber-500' },
+  { name: 'Cyan', value: 'bg-cyan-500' },
+  { name: 'Lime', value: 'bg-lime-500' }
+];
+
+// Admin password for employee management
+const ADMIN_PASSWORD = 'crad2026';
 
 const EVENT_TYPES = [
   'Install',
@@ -42,16 +61,28 @@ const REMINDERS = [
 
 const FieldServiceCalendar = () => {
   const [events, setEvents] = useState([]);
+  const [employees, setEmployees] = useState(DEFAULT_EMPLOYEES);
   const [showModal, setShowModal] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date());
-  const [filterEmployee, setFilterEmployee] = useState('all');
+  const [filterEmployees, setFilterEmployees] = useState(DEFAULT_EMPLOYEES.map(e => e.id)); // Array of selected employee IDs
   const [filterEventType, setFilterEventType] = useState('all');
   const [showFilters, setShowFilters] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
-  const [viewMode, setViewMode] = useState('week'); // 'week', 'biweekly', 'monthly'
+  const [employeesInitialized, setEmployeesInitialized] = useState(false);
+  const [viewMode, setViewMode] = useState('week'); // 'week', 'biweekly', 'monthly', '2month'
   const [expandedCells, setExpandedCells] = useState({});
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [editingEventId, setEditingEventId] = useState(null);
+
+  // Employee management state
+  const [showEmployeeModal, setShowEmployeeModal] = useState(false);
+  const [showPasswordPrompt, setShowPasswordPrompt] = useState(false);
+  const [passwordInput, setPasswordInput] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [newEmployee, setNewEmployee] = useState({ name: '', title: '', color: 'bg-blue-500' });
+  const [editingEmployeeId, setEditingEmployeeId] = useState(null);
+  const [draggedEmployee, setDraggedEmployee] = useState(null);
 
   const [newEvent, setNewEvent] = useState({
     employee: '',
@@ -100,6 +131,149 @@ const FieldServiceCalendar = () => {
     } catch (error) {
       console.error('Error deleting event:', error);
     }
+  };
+
+  // Load employees from Firestore with real-time updates
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collection(db, 'employees'), (snapshot) => {
+      if (snapshot.empty) {
+        // No employees in Firestore, use defaults and save them with sortOrder
+        DEFAULT_EMPLOYEES.forEach((emp, index) => {
+          setDoc(doc(db, 'employees', emp.id), { ...emp, sortOrder: index });
+        });
+        setEmployees(DEFAULT_EMPLOYEES.map((emp, index) => ({ ...emp, sortOrder: index })));
+        setFilterEmployees(DEFAULT_EMPLOYEES.map(e => e.id));
+      } else {
+        const loadedEmployees = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        // Sort by sortOrder, fallback to name if no sortOrder
+        loadedEmployees.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
+        setEmployees(loadedEmployees);
+        // Update filter to include all employees if not initialized
+        if (!employeesInitialized) {
+          setFilterEmployees(loadedEmployees.map(e => e.id));
+        }
+      }
+      setEmployeesInitialized(true);
+    }, (error) => {
+      console.error('Error loading employees:', error);
+      setEmployeesInitialized(true);
+    });
+
+    return () => unsubscribe();
+  }, [employeesInitialized]);
+
+  // Save employee to Firestore
+  const saveEmployeeToFirestore = async (employee) => {
+    try {
+      await setDoc(doc(db, 'employees', employee.id), employee);
+    } catch (error) {
+      console.error('Error saving employee:', error);
+    }
+  };
+
+  // Delete employee from Firestore
+  const deleteEmployeeFromFirestore = async (employeeId) => {
+    try {
+      await deleteDoc(doc(db, 'employees', employeeId));
+    } catch (error) {
+      console.error('Error deleting employee:', error);
+    }
+  };
+
+  // Password verification
+  const handlePasswordSubmit = () => {
+    if (passwordInput === ADMIN_PASSWORD) {
+      setIsAdmin(true);
+      setShowPasswordPrompt(false);
+      setShowEmployeeModal(true);
+      setPasswordInput('');
+      setPasswordError('');
+    } else {
+      setPasswordError('Incorrect password');
+    }
+  };
+
+  // Handle add/edit employee
+  const handleSaveEmployee = () => {
+    if (!newEmployee.name.trim()) {
+      alert('Please enter an employee name');
+      return;
+    }
+
+    const employeeId = editingEmployeeId || newEmployee.name.toLowerCase().replace(/\s+/g, '-');
+    const employeeData = {
+      id: employeeId,
+      name: newEmployee.name.trim(),
+      title: newEmployee.title.trim(),
+      color: newEmployee.color
+    };
+
+    saveEmployeeToFirestore(employeeData);
+
+    // Add to filter if new employee
+    if (!editingEmployeeId) {
+      setFilterEmployees(prev => [...prev, employeeId]);
+    }
+
+    setNewEmployee({ name: '', title: '', color: 'bg-blue-500' });
+    setEditingEmployeeId(null);
+  };
+
+  // Handle edit employee
+  const handleEditEmployee = (employee) => {
+    setNewEmployee({
+      name: employee.name,
+      title: employee.title,
+      color: employee.color
+    });
+    setEditingEmployeeId(employee.id);
+  };
+
+  // Handle delete employee
+  const handleDeleteEmployee = (employeeId) => {
+    if (confirm('Are you sure you want to delete this employee? Their events will remain but show as unassigned.')) {
+      deleteEmployeeFromFirestore(employeeId);
+      setFilterEmployees(prev => prev.filter(id => id !== employeeId));
+    }
+  };
+
+  // Drag and drop handlers for employee reordering
+  const handleDragStart = (e, employee) => {
+    setDraggedEmployee(employee);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e, targetEmployee) => {
+    e.preventDefault();
+    if (!draggedEmployee || draggedEmployee.id === targetEmployee.id) return;
+  };
+
+  const handleDrop = (e, targetEmployee) => {
+    e.preventDefault();
+    if (!draggedEmployee || draggedEmployee.id === targetEmployee.id) return;
+
+    const draggedIndex = employees.findIndex(emp => emp.id === draggedEmployee.id);
+    const targetIndex = employees.findIndex(emp => emp.id === targetEmployee.id);
+
+    // Reorder the array
+    const newEmployees = [...employees];
+    newEmployees.splice(draggedIndex, 1);
+    newEmployees.splice(targetIndex, 0, draggedEmployee);
+
+    // Update sortOrder for all employees and save to Firestore
+    newEmployees.forEach((emp, index) => {
+      const updatedEmployee = { ...emp, sortOrder: index };
+      saveEmployeeToFirestore(updatedEmployee);
+    });
+
+    setDraggedEmployee(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedEmployee(null);
   };
 
   // Date utility functions
@@ -191,12 +365,34 @@ const FieldServiceCalendar = () => {
     return dates;
   };
 
+  const getTwoMonthDates = (date) => {
+    // Start from Monday of the current week
+    const startDate = new Date(date);
+    const startDayOfWeek = startDate.getDay();
+    const startDiff = startDayOfWeek === 0 ? -6 : 1 - startDayOfWeek;
+    startDate.setDate(startDate.getDate() + startDiff);
+
+    // End 8 weeks (56 days) later on Sunday - approximately 2 months
+    const endDate = new Date(startDate);
+    endDate.setDate(endDate.getDate() + 55); // 8 weeks - 1 day = 55 days to get to Sunday
+
+    const dates = [];
+    const curr = new Date(startDate);
+    while (curr <= endDate) {
+      dates.push(new Date(curr));
+      curr.setDate(curr.getDate() + 1);
+    }
+    return dates;
+  };
+
   const getDisplayDates = () => {
     switch (viewMode) {
       case 'biweekly':
         return getBiWeeklyDates(selectedDate);
       case 'monthly':
         return getMonthDates(selectedDate);
+      case '2month':
+        return getTwoMonthDates(selectedDate);
       default:
         return getWeekDates(selectedDate);
     }
@@ -204,10 +400,21 @@ const FieldServiceCalendar = () => {
 
   const displayDates = getDisplayDates();
 
-  // Filter employees based on selected filter
-  const filteredEmployees = filterEmployee === 'all'
-    ? EMPLOYEES
-    : EMPLOYEES.filter(emp => emp.id === filterEmployee);
+  // Filter employees based on selected filters
+  const filteredEmployees = employees.filter(emp => filterEmployees.includes(emp.id));
+
+  // Toggle employee filter
+  const toggleEmployeeFilter = (empId) => {
+    setFilterEmployees(prev =>
+      prev.includes(empId)
+        ? prev.filter(id => id !== empId)
+        : [...prev, empId]
+    );
+  };
+
+  // Select all / deselect all employees
+  const selectAllEmployees = () => setFilterEmployees(employees.map(e => e.id));
+  const deselectAllEmployees = () => setFilterEmployees([]);
 
   // Check if an event spans a specific date
   const eventSpansDate = (event, date) => {
@@ -219,7 +426,7 @@ const FieldServiceCalendar = () => {
   const getEventsForDate = (date) => {
     return events.filter(event =>
       eventSpansDate(event, date) &&
-      (filterEmployee === 'all' || event.employee === filterEmployee) &&
+      filterEmployees.includes(event.employee) &&
       (filterEventType === 'all' || (event.eventTypes && event.eventTypes.includes(filterEventType)))
     );
   };
@@ -426,7 +633,7 @@ const FieldServiceCalendar = () => {
   };
 
   const getEmployeeColor = (employeeId) => {
-    const employee = EMPLOYEES.find(e => e.id === employeeId);
+    const employee = employees.find(e => e.id === employeeId);
     return employee?.color || 'bg-gray-500';
   };
 
@@ -593,6 +800,233 @@ const FieldServiceCalendar = () => {
     );
   };
 
+  // Render 2-Month View - Compact color-only bars
+  const render2MonthView = () => {
+    const colCount = displayDates.length;
+    const fixedRowHeight = 120; // Larger row height for better visibility
+    const rowPadding = 6;
+
+    // Get month labels for header
+    const months = [];
+    let currentMonth = -1;
+    displayDates.forEach((date, idx) => {
+      if (date.getMonth() !== currentMonth) {
+        currentMonth = date.getMonth();
+        months.push({
+          month: date.toLocaleDateString('en-US', { month: 'short' }),
+          startIdx: idx,
+          year: date.getFullYear()
+        });
+      }
+    });
+
+    return (
+      <div className="hidden md:block overflow-x-auto">
+        <div className="min-w-max">
+          {/* Month Headers */}
+          <div className="flex bg-gray-100 border-b">
+            <div className="w-36 flex-shrink-0 px-3 py-2 text-left text-sm font-semibold text-gray-700 border-r">
+              Employee
+            </div>
+            <div className="flex-1 flex">
+              {months.map((m, idx) => {
+                const nextStart = months[idx + 1]?.startIdx || colCount;
+                const span = nextStart - m.startIdx;
+                const widthPercent = (span / colCount) * 100;
+                return (
+                  <div
+                    key={idx}
+                    className="text-center text-sm font-bold text-gray-700 py-2 border-r"
+                    style={{ width: `${widthPercent}%` }}
+                  >
+                    {m.month} {m.year}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Day Numbers Header */}
+          <div className="flex bg-gray-50 border-b">
+            <div className="w-36 flex-shrink-0 px-3 py-1 border-r" />
+            {displayDates.map((date, idx) => {
+              const isToday = formatDate(date) === formatDate(new Date());
+              const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+              return (
+                <div
+                  key={idx}
+                  className={`flex-1 min-w-[28px] text-center text-[10px] py-1 border-r ${isWeekend ? 'bg-gray-100' : ''} ${isToday ? 'bg-blue-100 font-bold text-blue-600' : 'text-gray-600'}`}
+                >
+                  {date.getDate()}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Employee Rows */}
+          {filteredEmployees.map((employee) => {
+            const employeeEvents = getEventsForEmployee(employee.id);
+
+            const eventsWithSpanInfo = employeeEvents.map(event => ({
+              ...event,
+              spanInfo: getEventSpanInfo(event, displayDates)
+            })).filter(e => e.spanInfo);
+
+            eventsWithSpanInfo.sort((a, b) => a.spanInfo.startCol - b.spanInfo.startCol);
+
+            const rowOccupancy = [];
+            eventsWithSpanInfo.forEach(event => {
+              const { startCol, spanLength } = event.spanInfo;
+              const endCol = startCol + spanLength - 1;
+
+              let assignedRow = 0;
+              for (let row = 0; row < rowOccupancy.length; row++) {
+                const occupied = rowOccupancy[row];
+                let canFit = true;
+                for (let col = startCol; col <= endCol; col++) {
+                  if (occupied.includes(col)) {
+                    canFit = false;
+                    break;
+                  }
+                }
+                if (canFit) {
+                  assignedRow = row;
+                  break;
+                } else if (row === rowOccupancy.length - 1) {
+                  assignedRow = row + 1;
+                }
+              }
+
+              if (!rowOccupancy[assignedRow]) {
+                rowOccupancy[assignedRow] = [];
+              }
+
+              for (let col = startCol; col <= endCol; col++) {
+                rowOccupancy[assignedRow].push(col);
+              }
+
+              event.rowIndex = assignedRow;
+            });
+
+            const maxRows = Math.max(rowOccupancy.length, 2);
+            const availableHeight = fixedRowHeight - rowPadding;
+            const gap = 2;
+            const totalGaps = maxRows > 1 ? (maxRows - 1) * gap : 0;
+            const eventHeight = Math.floor((availableHeight - totalGaps) / maxRows);
+
+            return (
+              <div key={employee.id} className="flex border-b hover:bg-gray-50">
+                <div className="w-36 flex-shrink-0 px-3 py-2 border-r bg-gray-50">
+                  <div className="font-semibold text-sm text-gray-900">{employee.name}</div>
+                  <div className="text-xs text-gray-600 truncate">{employee.title}</div>
+                </div>
+                <div className="flex-1 relative" style={{ height: `${fixedRowHeight}px` }}>
+                  {/* Grid lines */}
+                  <div className="absolute inset-0 flex">
+                    {displayDates.map((date, idx) => {
+                      const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+                      return (
+                        <div key={idx} className={`flex-1 min-w-[28px] border-r ${isWeekend ? 'bg-gray-50' : ''}`} />
+                      );
+                    })}
+                  </div>
+
+                  {/* Events - color only, no text */}
+                  <div className="relative p-0.5 h-full">
+                    {eventsWithSpanInfo.map((event) => {
+                      const { spanInfo, rowIndex } = event;
+                      const leftPercent = (spanInfo.startCol / colCount) * 100;
+                      const widthPercent = (spanInfo.spanLength / colCount) * 100;
+                      const topPosition = rowIndex * (eventHeight + gap) + 2;
+
+                      return (
+                        <div
+                          key={event.id}
+                          className={`absolute border cursor-pointer hover:shadow-lg transition-shadow ${getEventTypeColor(event.eventTypes, event.tentative)}`}
+                          style={{
+                            left: `${leftPercent}%`,
+                            width: `${widthPercent}%`,
+                            top: `${topPosition}px`,
+                            height: `${eventHeight}px`,
+                            borderRadius: `${spanInfo.isStart ? '3px' : '0'} ${spanInfo.isEnd ? '3px' : '0'} ${spanInfo.isEnd ? '3px' : '0'} ${spanInfo.isStart ? '3px' : '0'}`
+                          }}
+                          onClick={() => setSelectedEvent(event)}
+                          title={`${employee.name}: ${getEventLabel(event)}${event.location ? ` @ ${event.location}` : ''}${event.notes ? ` - ${event.notes}` : ''}`}
+                        />
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Event Type Legend */}
+          <div className="bg-gray-50 border-t p-3">
+            <div className="flex flex-wrap gap-3 justify-center">
+              <div className="flex items-center gap-1.5">
+                <div className="w-4 h-4 rounded bg-blue-100 border border-blue-300" />
+                <span className="text-xs text-gray-700">Install</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-4 h-4 rounded bg-green-100 border border-green-300" />
+                <span className="text-xs text-gray-700">PM</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-4 h-4 rounded bg-yellow-100 border border-yellow-300" />
+                <span className="text-xs text-gray-700">Service Visit</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-4 h-4 rounded bg-purple-100 border border-purple-300" />
+                <span className="text-xs text-gray-700">Software Upgrade</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-4 h-4 rounded bg-cyan-100 border border-cyan-300" />
+                <span className="text-xs text-gray-700">PM + SW Upgrade</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-4 h-4 rounded bg-red-100 border border-red-300" />
+                <span className="text-xs text-gray-700">De Install</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-4 h-4 rounded bg-indigo-100 border border-indigo-300" />
+                <span className="text-xs text-gray-700">Acceptance Test</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-4 h-4 rounded bg-teal-100 border border-teal-300" />
+                <span className="text-xs text-gray-700">Remote Service</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-4 h-4 rounded bg-lime-100 border border-lime-300" />
+                <span className="text-xs text-gray-700">Site Visit</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-4 h-4 rounded bg-slate-100 border border-slate-300" />
+                <span className="text-xs text-gray-700">No Travel</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-4 h-4 rounded bg-sky-100 border border-sky-300" />
+                <span className="text-xs text-gray-700">Vacation</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-4 h-4 rounded bg-orange-100 border border-orange-300" />
+                <span className="text-xs text-gray-700">First Line</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-4 h-4 rounded bg-pink-100 border border-pink-300" />
+                <span className="text-xs text-gray-700">Custom</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-4 h-4 rounded bg-gray-200 border border-gray-400 border-dashed" />
+                <span className="text-xs text-gray-700">Tentative</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   // Render Monthly View - Traditional Calendar Grid
   const toggleCellExpand = (cellKey) => {
     setExpandedCells(prev => ({
@@ -618,7 +1052,7 @@ const FieldServiceCalendar = () => {
       const weekEvents = events.filter(event =>
         event.startDate <= weekEnd &&
         event.endDate >= weekStart &&
-        (filterEmployee === 'all' || event.employee === filterEmployee) &&
+        filterEmployees.includes(event.employee) &&
         (filterEventType === 'all' || (event.eventTypes && event.eventTypes.includes(filterEventType)))
       );
 
@@ -835,7 +1269,7 @@ const FieldServiceCalendar = () => {
         {/* Employee Legend */}
         <div className="p-4 border-t bg-gray-50">
           <div className="flex flex-wrap gap-4">
-            {EMPLOYEES.map(emp => (
+            {employees.map(emp => (
               <div key={emp.id} className="flex items-center gap-2">
                 <span className={`w-3 h-3 rounded-full ${emp.color}`} />
                 <span className="text-sm text-gray-700">{emp.name}</span>
@@ -864,7 +1298,7 @@ const FieldServiceCalendar = () => {
                 </div>
                 <div className="p-2 space-y-2">
                   {dayEvents.map(event => {
-                    const employee = EMPLOYEES.find(e => e.id === event.employee);
+                    const employee = employees.find(e => e.id === event.employee);
                     return (
                       <div
                         key={event.id}
@@ -946,7 +1380,7 @@ const FieldServiceCalendar = () => {
             <div className="flex flex-wrap items-center gap-2">
               {/* View Mode Toggle */}
               <div className="flex rounded-lg border border-gray-300 overflow-hidden">
-                {['week', 'biweekly', 'monthly'].map((mode) => (
+                {['week', 'biweekly', 'monthly', '2month'].map((mode) => (
                   <button
                     key={mode}
                     onClick={() => setViewMode(mode)}
@@ -956,7 +1390,7 @@ const FieldServiceCalendar = () => {
                         : 'bg-white text-gray-700 hover:bg-gray-100'
                     }`}
                   >
-                    {mode === 'biweekly' ? '2 Week' : mode.charAt(0).toUpperCase() + mode.slice(1)}
+                    {mode === 'biweekly' ? '2 Week' : mode === '2month' ? '2 Month' : mode.charAt(0).toUpperCase() + mode.slice(1)}
                   </button>
                 ))}
               </div>
@@ -990,6 +1424,19 @@ const FieldServiceCalendar = () => {
                 <Plus className="w-4 h-4" />
                 Add Event
               </button>
+              <button
+                onClick={() => {
+                  if (isAdmin) {
+                    setShowEmployeeModal(true);
+                  } else {
+                    setShowPasswordPrompt(true);
+                  }
+                }}
+                className="flex items-center gap-2 px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition"
+              >
+                <Settings className="w-4 h-4" />
+                Manage Team
+              </button>
             </div>
           </div>
 
@@ -998,16 +1445,39 @@ const FieldServiceCalendar = () => {
             <div className="mt-4 pt-4 border-t flex flex-col md:flex-row gap-4">
               <div className="flex-1">
                 <label className="block text-sm font-medium text-gray-700 mb-1">Filter by Employee</label>
-                <select
-                  value={filterEmployee}
-                  onChange={(e) => setFilterEmployee(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                >
-                  <option value="all">All Employees</option>
-                  {EMPLOYEES.map(emp => (
-                    <option key={emp.id} value={emp.id}>{emp.name}</option>
+                <div className="flex flex-wrap gap-2 items-center">
+                  <button
+                    onClick={selectAllEmployees}
+                    className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition"
+                  >
+                    Select All
+                  </button>
+                  <button
+                    onClick={deselectAllEmployees}
+                    className="px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition"
+                  >
+                    Clear All
+                  </button>
+                  {employees.map(emp => (
+                    <label
+                      key={emp.id}
+                      className={`flex items-center gap-1.5 px-2 py-1 rounded cursor-pointer transition ${
+                        filterEmployees.includes(emp.id)
+                          ? 'bg-blue-100 text-blue-800'
+                          : 'bg-gray-100 text-gray-500'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={filterEmployees.includes(emp.id)}
+                        onChange={() => toggleEmployeeFilter(emp.id)}
+                        className="w-3 h-3"
+                      />
+                      <span className={`w-2 h-2 rounded-full ${emp.color}`} />
+                      <span className="text-sm">{emp.name}</span>
+                    </label>
                   ))}
-                </select>
+                </div>
               </div>
               <div className="flex-1">
                 <label className="block text-sm font-medium text-gray-700 mb-1">Filter by Event Type</label>
@@ -1061,7 +1531,7 @@ const FieldServiceCalendar = () => {
       {/* Calendar Grid */}
       <div className="max-w-[98%] mx-auto">
         <div className="bg-white rounded-lg shadow-sm overflow-hidden">
-          {viewMode === 'monthly' ? renderMonthlyView() : renderWeekBiWeeklyView()}
+          {viewMode === 'monthly' ? renderMonthlyView() : viewMode === '2month' ? render2MonthView() : renderWeekBiWeeklyView()}
           {renderMobileView()}
         </div>
       </div>
@@ -1093,7 +1563,7 @@ const FieldServiceCalendar = () => {
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   >
                     <option value="">Select Employee</option>
-                    {EMPLOYEES.map(emp => (
+                    {employees.map(emp => (
                       <option key={emp.id} value={emp.id}>{emp.name}</option>
                     ))}
                   </select>
@@ -1283,7 +1753,7 @@ const FieldServiceCalendar = () => {
               <div className="flex items-center gap-3">
                 <span className={`w-3 h-3 rounded-full ${getEmployeeColor(selectedEvent.employee)}`} />
                 <span className="font-medium">
-                  {EMPLOYEES.find(e => e.id === selectedEvent.employee)?.name}
+                  {employees.find(e => e.id === selectedEvent.employee)?.name}
                 </span>
               </div>
 
@@ -1351,6 +1821,203 @@ const FieldServiceCalendar = () => {
               <button
                 onClick={() => setSelectedEvent(null)}
                 className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium py-2 rounded-lg transition"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Password Prompt Modal */}
+      {showPasswordPrompt && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm">
+            <div className="p-4 border-b flex justify-between items-center">
+              <h3 className="font-semibold text-gray-900">Admin Access Required</h3>
+              <button
+                onClick={() => {
+                  setShowPasswordPrompt(false);
+                  setPasswordInput('');
+                  setPasswordError('');
+                }}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Enter Password
+              </label>
+              <input
+                type="password"
+                value={passwordInput}
+                onChange={(e) => setPasswordInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handlePasswordSubmit()}
+                placeholder="Password"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                autoFocus
+              />
+              {passwordError && (
+                <p className="text-red-500 text-sm mt-2">{passwordError}</p>
+              )}
+            </div>
+            <div className="p-4 border-t flex gap-2">
+              <button
+                onClick={() => {
+                  setShowPasswordPrompt(false);
+                  setPasswordInput('');
+                  setPasswordError('');
+                }}
+                className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium py-2 rounded-lg transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handlePasswordSubmit}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 rounded-lg transition"
+              >
+                Submit
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Employee Management Modal */}
+      {showEmployeeModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="p-4 border-b flex justify-between items-center">
+              <h3 className="font-semibold text-gray-900">Manage Team Members</h3>
+              <button
+                onClick={() => {
+                  setShowEmployeeModal(false);
+                  setNewEmployee({ name: '', title: '', color: 'bg-blue-500' });
+                  setEditingEmployeeId(null);
+                }}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-4 overflow-y-auto flex-1">
+              {/* Add/Edit Employee Form */}
+              <div className="bg-gray-50 rounded-lg p-4 mb-4">
+                <h4 className="font-medium text-gray-900 mb-3">
+                  {editingEmployeeId ? 'Edit Employee' : 'Add New Employee'}
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
+                    <input
+                      type="text"
+                      value={newEmployee.name}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, name: e.target.value })}
+                      placeholder="Employee name"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+                    <input
+                      type="text"
+                      value={newEmployee.title}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, title: e.target.value })}
+                      placeholder="Job title"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Color</label>
+                    <div className="flex flex-wrap gap-2">
+                      {EMPLOYEE_COLORS.map(color => (
+                        <button
+                          key={color.value}
+                          onClick={() => setNewEmployee({ ...newEmployee, color: color.value })}
+                          className={`w-6 h-6 rounded-full ${color.value} ${
+                            newEmployee.color === color.value ? 'ring-2 ring-offset-2 ring-gray-400' : ''
+                          }`}
+                          title={color.name}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-3 flex gap-2">
+                  <button
+                    onClick={handleSaveEmployee}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition"
+                  >
+                    {editingEmployeeId ? 'Update Employee' : 'Add Employee'}
+                  </button>
+                  {editingEmployeeId && (
+                    <button
+                      onClick={() => {
+                        setNewEmployee({ name: '', title: '', color: 'bg-blue-500' });
+                        setEditingEmployeeId(null);
+                      }}
+                      className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition"
+                    >
+                      Cancel Edit
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Employee List */}
+              <h4 className="font-medium text-gray-900 mb-3">Current Team Members</h4>
+              <p className="text-sm text-gray-500 mb-2">Drag to reorder employees</p>
+              <div className="space-y-2">
+                {employees.map(emp => (
+                  <div
+                    key={emp.id}
+                    draggable
+                    onDragStart={(e) => handleDragStart(e, emp)}
+                    onDragOver={(e) => handleDragOver(e, emp)}
+                    onDrop={(e) => handleDrop(e, emp)}
+                    onDragEnd={handleDragEnd}
+                    className={`flex items-center justify-between p-3 bg-white border rounded-lg hover:bg-gray-50 cursor-move transition ${
+                      draggedEmployee?.id === emp.id ? 'opacity-50 border-blue-400' : ''
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <GripVertical className="w-4 h-4 text-gray-400" />
+                      <span className={`w-4 h-4 rounded-full ${emp.color}`} />
+                      <div>
+                        <p className="font-medium text-gray-900">{emp.name}</p>
+                        <p className="text-sm text-gray-500">{emp.title}</p>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => handleEditEmployee(emp)}
+                        className="px-3 py-1 text-sm bg-blue-100 hover:bg-blue-200 text-blue-700 rounded transition"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => handleDeleteEmployee(emp.id)}
+                        className="px-3 py-1 text-sm bg-red-100 hover:bg-red-200 text-red-700 rounded transition"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="p-4 border-t">
+              <button
+                onClick={() => {
+                  setShowEmployeeModal(false);
+                  setNewEmployee({ name: '', title: '', color: 'bg-blue-500' });
+                  setEditingEmployeeId(null);
+                }}
+                className="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium py-2 rounded-lg transition"
               >
                 Close
               </button>
