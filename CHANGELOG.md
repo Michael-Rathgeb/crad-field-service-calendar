@@ -1,5 +1,23 @@
 # CRAD Field Service Calendar - Changelog
 
+## Version 1.2.0 (January 26, 2026)
+
+### Company Holidays
+- **Holiday Display**: Company holidays now shown on all calendar views
+  - New Year's Day (January 1)
+  - President's Day (February 16)
+  - Memorial Day (May 25)
+  - Independence Day (July 3)
+  - Labor Day (September 7)
+  - Thanksgiving (November 26-27)
+  - Christmas Day (December 25)
+- **Visual Styling**: Holidays highlighted with red background and badges
+  - Week/Bi-Weekly view: Red background with holiday name badge
+  - 2-Month view: Red highlighted dates with hover tooltip
+  - Monthly view: Red background with holiday name badge
+
+---
+
 ## Version 1.1.0 (January 8, 2026)
 
 ### New Views
