@@ -59,6 +59,18 @@ const REMINDERS = [
   { id: 'payday', label: 'Payday', startDate: '2026-01-09', intervalDays: 14, color: 'bg-emerald-500' }
 ];
 
+// Company holidays (month and day only - works for any year)
+const HOLIDAYS = [
+  { month: 1, day: 1, label: "New Year's Day" },
+  { month: 2, day: 16, label: "President's Day" },
+  { month: 5, day: 25, label: 'Memorial Day' },
+  { month: 7, day: 3, label: 'Independence Day' },
+  { month: 9, day: 7, label: 'Labor Day' },
+  { month: 11, day: 26, label: 'Thanksgiving' },
+  { month: 11, day: 27, label: 'Thanksgiving' },
+  { month: 12, day: 25, label: 'Christmas Day' }
+];
+
 const FieldServiceCalendar = () => {
   const [events, setEvents] = useState([]);
   const [employees, setEmployees] = useState(DEFAULT_EMPLOYEES);
@@ -303,6 +315,13 @@ const FieldServiceCalendar = () => {
       // Check if this date falls on the reminder schedule (on or after start, and divisible by interval)
       return diffDays >= 0 && diffDays % reminder.intervalDays === 0;
     });
+  };
+
+  // Get holiday for a specific date (if any)
+  const getHolidayForDate = (date) => {
+    const month = date.getMonth() + 1; // getMonth() is 0-indexed
+    const day = date.getDate();
+    return HOLIDAYS.find(h => h.month === month && h.day === day);
   };
 
   const getWeekDates = (date) => {
@@ -665,15 +684,21 @@ const FieldServiceCalendar = () => {
             </div>
             {displayDates.map((date, idx) => {
               const reminders = getRemindersForDate(date);
+              const holiday = getHolidayForDate(date);
               return (
                 <div
                   key={idx}
-                  className="flex-1 min-w-[100px] px-2 py-2 text-center text-sm font-semibold text-gray-700 border-r"
+                  className={`flex-1 min-w-[100px] px-2 py-2 text-center text-sm font-semibold border-r ${holiday ? 'bg-red-50' : ''}`}
                 >
-                  <div>{date.toLocaleDateString('en-US', { weekday: 'short' })}</div>
-                  <div className={`text-lg ${formatDate(date) === formatDate(new Date()) ? 'text-blue-600 font-bold' : ''}`}>
+                  <div className={holiday ? 'text-red-700' : 'text-gray-700'}>{date.toLocaleDateString('en-US', { weekday: 'short' })}</div>
+                  <div className={`text-lg ${formatDate(date) === formatDate(new Date()) ? 'text-blue-600 font-bold' : holiday ? 'text-red-700' : ''}`}>
                     {date.getDate()}
                   </div>
+                  {holiday && (
+                    <div className="text-[10px] px-1.5 py-0.5 rounded bg-red-500 text-white mt-1 inline-block">
+                      {holiday.label}
+                    </div>
+                  )}
                   {reminders.length > 0 && (
                     <div className="flex flex-wrap justify-center gap-1 mt-1">
                       {reminders.map(r => (
@@ -852,10 +877,12 @@ const FieldServiceCalendar = () => {
             {displayDates.map((date, idx) => {
               const isToday = formatDate(date) === formatDate(new Date());
               const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+              const holiday = getHolidayForDate(date);
               return (
                 <div
                   key={idx}
-                  className={`flex-1 min-w-[28px] text-center text-[10px] py-1 border-r ${isWeekend ? 'bg-gray-100' : ''} ${isToday ? 'bg-blue-100 font-bold text-blue-600' : 'text-gray-600'}`}
+                  className={`flex-1 min-w-[28px] text-center text-[10px] py-1 border-r ${holiday ? 'bg-red-100 text-red-700 font-bold' : isWeekend ? 'bg-gray-100' : ''} ${isToday ? 'bg-blue-100 font-bold text-blue-600' : ''}`}
+                  title={holiday ? holiday.label : ''}
                 >
                   {date.getDate()}
                 </div>
@@ -1157,25 +1184,29 @@ const FieldServiceCalendar = () => {
                   const isCurrentMonth = date.getMonth() === currentMonth;
                   const isToday = formatDate(date) === formatDate(new Date());
                   const reminders = getRemindersForDate(date);
+                  const holiday = getHolidayForDate(date);
 
                   return (
                     <div
                       key={dayIdx}
-                      className={`px-3 py-2 border-r last:border-r-0 ${isCurrentMonth ? 'bg-white' : 'bg-gray-50'}`}
+                      className={`px-3 py-2 border-r last:border-r-0 ${holiday ? 'bg-red-50' : isCurrentMonth ? 'bg-white' : 'bg-gray-50'}`}
                     >
                       <div className="flex items-center justify-between">
-                        <span className={`text-base font-medium ${isToday ? 'text-blue-600 font-bold' : isCurrentMonth ? 'text-gray-900' : 'text-gray-400'}`}>
+                        <span className={`text-base font-medium ${isToday ? 'text-blue-600 font-bold' : holiday ? 'text-red-700 font-bold' : isCurrentMonth ? 'text-gray-900' : 'text-gray-400'}`}>
                           {date.getDate()}
                         </span>
-                        {reminders.length > 0 && (
-                          <div className="flex gap-1">
-                            {reminders.map(r => (
-                              <span key={r.id} className={`text-[9px] px-1 py-0.5 rounded text-white ${r.color}`}>
-                                {r.label}
-                              </span>
-                            ))}
-                          </div>
-                        )}
+                        <div className="flex gap-1 flex-wrap justify-end">
+                          {holiday && (
+                            <span className="text-[9px] px-1 py-0.5 rounded text-white bg-red-500">
+                              {holiday.label}
+                            </span>
+                          )}
+                          {reminders.map(r => (
+                            <span key={r.id} className={`text-[9px] px-1 py-0.5 rounded text-white ${r.color}`}>
+                              {r.label}
+                            </span>
+                          ))}
+                        </div>
                       </div>
                     </div>
                   );
