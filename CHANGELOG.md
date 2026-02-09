@@ -1,5 +1,82 @@
 # CRAD Field Service Calendar - Changelog
 
+## Version 2.0.0 (In Progress - February 8, 2026)
+
+### Multi-Department Platform Expansion
+
+This version transforms the single-purpose Field Service calendar into a multi-department, multi-region platform. See `clinical-apps-implementation.md` for full architecture details.
+
+#### Phase 1: Config Extraction (COMPLETE)
+
+**New Config System:**
+- Created `src/config/` directory structure for department and region configs
+- `src/config/departments/field_service.js` - Field Service event types, colors, products
+- `src/config/departments/clinical.js` - Clinical Applications event types, colors, products
+- `src/config/regions/americas.js` - Americas holidays, reminders, admin password
+- `src/config/index.js` - Central config loader with environment variable support
+
+**Environment Variables:**
+- `VITE_DEPARTMENT` - Sets active department (`field_service` or `clinical`)
+- `VITE_REGION` - Sets active region (`americas`)
+- `.env` - Default config (Field Service Americas)
+- `.env.clinical` - Clinical mode for local testing (`npx vite --mode clinical`)
+
+**Code Refactoring:**
+- Removed all hardcoded constants from `crad-calendar.jsx`
+- `EVENT_TYPES` → `departmentConfig.eventTypes`
+- `PRODUCTS` → `departmentConfig.products`
+- `REMINDERS` → `regionConfig.reminders`
+- `HOLIDAYS` → `regionConfig.holidays`
+- `ADMIN_PASSWORD` → `regionConfig.adminPassword`
+- Updated `getEventTypeColor()` to use config-based color lookup
+- Made 2-month view legend dynamic (generated from config)
+- Added department/region label in header ("Americas — Field Service" or "Americas — Clinical Applications")
+
+**Clinical Applications Config:**
+- Event Types: First Line, Vacation, Refresh Catalyst, Refresh Sentinel, Phase 1 Catalyst Training, Phase 2 Catalyst Training, Phase 1 Sentinel Training, Phase 2 Sentinel Training, Custom
+- Products: Catalyst + HD, Catalyst + Lite, Catalyst + HD PT, Sentinel, cAutoVerify
+
+#### Phase 2: Firebase Data Migration (COMPLETE)
+
+**Migration Script:**
+- Created `scripts/migrate-firestore.html` - Browser-based migration tool
+- Adds `region` and `department` fields to all existing employees and events
+- Preview mode to see changes before applying
+- Safe to run multiple times (skips already-migrated documents)
+
+**Firestore Query Updates:**
+- Added `query` and `where` imports from Firebase
+- Employees listener now filters by `region` + `department`
+- Events listener now filters by `region` + `department`
+- New employees/events automatically include `region` and `department` fields
+- Removed `DEFAULT_EMPLOYEES` fallback (each department manages its own employees)
+
+#### Phase 3: Cross-Department Toggle (COMPLETE)
+
+**Cross-Department Visibility:**
+- New "Show [Other Department]" toggle button in header
+- When enabled, displays other department's employees and events
+- Cross-view data is read-only (view only, no editing)
+
+**Visual Distinction for Cross-View Data:**
+- Amber-tinted background on employee name column
+- Department label shown next to employee name (e.g., "(Clinical Applications)")
+- Reduced opacity (60%) for cross-view rows
+- Works in all views: Week, Bi-Weekly, 2-Month, and Mobile
+
+**Technical Implementation:**
+- `crossViewEnabled` state controls toggle
+- Separate Firestore listeners for cross-department data
+- `allDisplayEmployees` combines home + cross-view employees
+- `getEventsForEmployee()` accepts `isCrossView` parameter to fetch from correct event source
+
+#### Phase 4: Vercel Deployment (PENDING)
+- Purchase domain (e.g., cradcalendar.com)
+- Deploy to Vercel with subdomains per department/region
+- Remove GitHub Pages deployment
+
+---
+
 ## Version 1.2.0 (January 26, 2026)
 
 ### Company Holidays

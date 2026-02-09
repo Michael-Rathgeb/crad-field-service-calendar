@@ -1,16 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, X, Filter, ChevronLeft, ChevronRight, Settings, Trash2, GripVertical } from 'lucide-react';
 import { db } from './firebase';
-import { collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
-
-// Default employees (used for initial setup)
-const DEFAULT_EMPLOYEES = [
-  { id: 'mike', name: 'Mike', title: 'Field Service Engineer', color: 'bg-blue-500' },
-  { id: 'jordan', name: 'Jordan', title: 'Senior Field Service Engineer', color: 'bg-green-500' },
-  { id: 'febin', name: 'Febin', title: 'Field Service Engineer', color: 'bg-purple-500' },
-  { id: 'peter', name: 'Peter', title: 'Field Service Manager', color: 'bg-orange-500' },
-  { id: 'cyber-robotics', name: 'Cyber Robotics', title: 'Partner', color: 'bg-rose-500' }
-];
+import { collection, doc, setDoc, deleteDoc, onSnapshot, query, where } from 'firebase/firestore';
+import { departmentConfig, regionConfig, allDepartments, DEPARTMENT, REGION } from './config';
 
 // Available colors for employees
 const EMPLOYEE_COLORS = [
@@ -26,57 +18,12 @@ const EMPLOYEE_COLORS = [
   { name: 'Lime', value: 'bg-lime-500' }
 ];
 
-// Admin password for employee management
-const ADMIN_PASSWORD = 'crad2026';
-
-const EVENT_TYPES = [
-  'Install',
-  'PM',
-  'Service Visit',
-  'Software Upgrade',
-  'De Install',
-  'Acceptance Test',
-  'Remote Service',
-  'Site Visit',
-  'No Travel',
-  'Vacation',
-  'First Line',
-  'Custom'
-];
-
-const PRODUCTS = [
-  'Catalyst +',
-  'Catalyst Classic',
-  'Sentinel',
-  'VCLP',
-  'c4D Server',
-  'cAutoVerify'
-];
-
-// Recurring reminders - startDate is the first occurrence, intervalDays is how often it repeats
-const REMINDERS = [
-  { id: 'timecard', label: 'Time Card', startDate: '2026-01-05', intervalDays: 14, color: 'bg-amber-500' },
-  { id: 'payday', label: 'Payday', startDate: '2026-01-09', intervalDays: 14, color: 'bg-emerald-500' }
-];
-
-// Company holidays (month and day only - works for any year)
-const HOLIDAYS = [
-  { month: 1, day: 1, label: "New Year's Day" },
-  { month: 2, day: 16, label: "President's Day" },
-  { month: 5, day: 25, label: 'Memorial Day' },
-  { month: 7, day: 3, label: 'Independence Day' },
-  { month: 9, day: 7, label: 'Labor Day' },
-  { month: 11, day: 26, label: 'Thanksgiving' },
-  { month: 11, day: 27, label: 'Thanksgiving' },
-  { month: 12, day: 25, label: 'Christmas Day' }
-];
-
 const FieldServiceCalendar = () => {
   const [events, setEvents] = useState([]);
-  const [employees, setEmployees] = useState(DEFAULT_EMPLOYEES);
+  const [employees, setEmployees] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date());
-  const [filterEmployees, setFilterEmployees] = useState(DEFAULT_EMPLOYEES.map(e => e.id)); // Array of selected employee IDs
+  const [filterEmployees, setFilterEmployees] = useState([]); // Array of selected employee IDs (loaded from Firestore)
   const [filterEventType, setFilterEventType] = useState('all');
   const [showFilters, setShowFilters] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
@@ -96,6 +43,11 @@ const FieldServiceCalendar = () => {
   const [editingEmployeeId, setEditingEmployeeId] = useState(null);
   const [draggedEmployee, setDraggedEmployee] = useState(null);
 
+  // Cross-department view state
+  const [crossViewEnabled, setCrossViewEnabled] = useState(false);
+  const [crossViewEvents, setCrossViewEvents] = useState([]);
+  const [crossViewEmployees, setCrossViewEmployees] = useState([]);
+
   const [newEvent, setNewEvent] = useState({
     employee: '',
     eventTypes: [],
@@ -109,9 +61,15 @@ const FieldServiceCalendar = () => {
     tentative: false
   });
 
-  // Load events from Firestore with real-time updates
+  // Load events from Firestore with real-time updates (filtered by region+department)
   useEffect(() => {
-    const unsubscribe = onSnapshot(collection(db, 'events'), (snapshot) => {
+    const eventsQuery = query(
+      collection(db, 'events'),
+      where('region', '==', REGION),
+      where('department', '==', DEPARTMENT)
+    );
+
+    const unsubscribe = onSnapshot(eventsQuery, (snapshot) => {
       const loadedEvents = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
@@ -145,16 +103,19 @@ const FieldServiceCalendar = () => {
     }
   };
 
-  // Load employees from Firestore with real-time updates
+  // Load employees from Firestore with real-time updates (filtered by region+department)
   useEffect(() => {
-    const unsubscribe = onSnapshot(collection(db, 'employees'), (snapshot) => {
+    const employeesQuery = query(
+      collection(db, 'employees'),
+      where('region', '==', REGION),
+      where('department', '==', DEPARTMENT)
+    );
+
+    const unsubscribe = onSnapshot(employeesQuery, (snapshot) => {
       if (snapshot.empty) {
-        // No employees in Firestore, use defaults and save them with sortOrder
-        DEFAULT_EMPLOYEES.forEach((emp, index) => {
-          setDoc(doc(db, 'employees', emp.id), { ...emp, sortOrder: index });
-        });
-        setEmployees(DEFAULT_EMPLOYEES.map((emp, index) => ({ ...emp, sortOrder: index })));
-        setFilterEmployees(DEFAULT_EMPLOYEES.map(e => e.id));
+        // No employees for this region+department yet
+        setEmployees([]);
+        setFilterEmployees([]);
       } else {
         const loadedEmployees = snapshot.docs.map(doc => ({
           id: doc.id,
@@ -177,6 +138,47 @@ const FieldServiceCalendar = () => {
     return () => unsubscribe();
   }, [employeesInitialized]);
 
+  // Cross-department data listener
+  const otherDepartment = DEPARTMENT === 'field_service' ? 'clinical' : 'field_service';
+  const otherDepartmentConfig = allDepartments[otherDepartment];
+
+  useEffect(() => {
+    if (!crossViewEnabled) {
+      setCrossViewEvents([]);
+      setCrossViewEmployees([]);
+      return;
+    }
+
+    // Listen to other department's employees
+    const empQuery = query(
+      collection(db, 'employees'),
+      where('region', '==', REGION),
+      where('department', '==', otherDepartment)
+    );
+
+    const unsubEmployees = onSnapshot(empQuery, (snapshot) => {
+      const loaded = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      loaded.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
+      setCrossViewEmployees(loaded);
+    });
+
+    // Listen to other department's events
+    const evtQuery = query(
+      collection(db, 'events'),
+      where('region', '==', REGION),
+      where('department', '==', otherDepartment)
+    );
+
+    const unsubEvents = onSnapshot(evtQuery, (snapshot) => {
+      setCrossViewEvents(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+
+    return () => {
+      unsubEmployees();
+      unsubEvents();
+    };
+  }, [crossViewEnabled]);
+
   // Save employee to Firestore
   const saveEmployeeToFirestore = async (employee) => {
     try {
@@ -197,7 +199,7 @@ const FieldServiceCalendar = () => {
 
   // Password verification
   const handlePasswordSubmit = () => {
-    if (passwordInput === ADMIN_PASSWORD) {
+    if (passwordInput === regionConfig.adminPassword) {
       setIsAdmin(true);
       setShowPasswordPrompt(false);
       setShowEmployeeModal(true);
@@ -220,7 +222,9 @@ const FieldServiceCalendar = () => {
       id: employeeId,
       name: newEmployee.name.trim(),
       title: newEmployee.title.trim(),
-      color: newEmployee.color
+      color: newEmployee.color,
+      region: REGION,
+      department: DEPARTMENT
     };
 
     saveEmployeeToFirestore(employeeData);
@@ -307,7 +311,7 @@ const FieldServiceCalendar = () => {
     const dateStr = formatDate(date);
     const targetDate = parseDate(dateStr);
 
-    return REMINDERS.filter(reminder => {
+    return regionConfig.reminders.filter(reminder => {
       const startDate = parseDate(reminder.startDate);
       const diffTime = targetDate.getTime() - startDate.getTime();
       const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
@@ -321,7 +325,7 @@ const FieldServiceCalendar = () => {
   const getHolidayForDate = (date) => {
     const month = date.getMonth() + 1; // getMonth() is 0-indexed
     const day = date.getDate();
-    return HOLIDAYS.find(h => h.month === month && h.day === day);
+    return regionConfig.holidays.find(h => h.month === month && h.day === day);
   };
 
   const getWeekDates = (date) => {
@@ -422,6 +426,14 @@ const FieldServiceCalendar = () => {
   // Filter employees based on selected filters
   const filteredEmployees = employees.filter(emp => filterEmployees.includes(emp.id));
 
+  // Combined employees including cross-view (marked with isCrossView flag)
+  const allDisplayEmployees = crossViewEnabled
+    ? [
+        ...filteredEmployees,
+        ...crossViewEmployees.map(emp => ({ ...emp, isCrossView: true }))
+      ]
+    : filteredEmployees;
+
   // Toggle employee filter
   const toggleEmployeeFilter = (empId) => {
     setFilterEmployees(prev =>
@@ -451,11 +463,12 @@ const FieldServiceCalendar = () => {
   };
 
   // Get events for a specific employee that appear in the visible date range
-  const getEventsForEmployee = (employeeId) => {
+  const getEventsForEmployee = (employeeId, isCrossView = false) => {
     const startDateStr = formatDate(displayDates[0]);
     const endDateStr = formatDate(displayDates[displayDates.length - 1]);
+    const eventSource = isCrossView ? crossViewEvents : events;
 
-    return events.filter(event =>
+    return eventSource.filter(event =>
       event.employee === employeeId &&
       event.startDate <= endDateStr &&
       event.endDate >= startDateStr &&
@@ -524,12 +537,12 @@ const FieldServiceCalendar = () => {
     }
 
     if (editingEventId) {
-      // Update existing event
-      const updatedEvent = { ...newEvent, id: editingEventId };
+      // Update existing event (preserve region/department)
+      const updatedEvent = { ...newEvent, id: editingEventId, region: REGION, department: DEPARTMENT };
       saveEventToFirestore(updatedEvent);
     } else {
-      // Add new event
-      const eventWithId = { ...newEvent, id: Date.now() };
+      // Add new event with region and department
+      const eventWithId = { ...newEvent, id: Date.now(), region: REGION, department: DEPARTMENT };
       saveEventToFirestore(eventWithId);
     }
 
@@ -624,31 +637,21 @@ const FieldServiceCalendar = () => {
 
     const types = Array.isArray(eventTypes) ? eventTypes : [eventTypes];
 
-    // Check for specific combinations first
-    const hasPM = types.includes('PM');
-    const hasSoftwareUpgrade = types.includes('Software Upgrade');
-
-    if (hasPM && hasSoftwareUpgrade) {
-      return 'bg-cyan-100 border-cyan-300 text-cyan-800'; // PM + Software Upgrade combo
+    // Check combo colors first (sorted key for consistent lookup)
+    const sortedKey = [...types].sort().join('+');
+    const combo = departmentConfig.comboColors[sortedKey];
+    if (combo) {
+      return `${combo.bg} ${combo.border} ${combo.text}`;
     }
 
-    const colors = {
-      'Install': 'bg-blue-100 border-blue-300 text-blue-800',
-      'PM': 'bg-green-100 border-green-300 text-green-800',
-      'Service Visit': 'bg-yellow-100 border-yellow-300 text-yellow-800',
-      'Software Upgrade': 'bg-purple-100 border-purple-300 text-purple-800',
-      'De Install': 'bg-red-100 border-red-300 text-red-800',
-      'Acceptance Test': 'bg-indigo-100 border-indigo-300 text-indigo-800',
-      'Remote Service': 'bg-teal-100 border-teal-300 text-teal-800',
-      'Site Visit': 'bg-lime-100 border-lime-300 text-lime-800',
-      'No Travel': 'bg-slate-100 border-slate-300 text-slate-800',
-      'Vacation': 'bg-sky-100 border-sky-300 text-sky-800',
-      'First Line': 'bg-orange-100 border-orange-300 text-orange-800',
-      'Custom': 'bg-pink-100 border-pink-300 text-pink-800'
-    };
-    // Use first event type for color, or default if none
+    // Use first event type color, or default if none
     const firstType = types[0];
-    return colors[firstType] || 'bg-gray-100 border-gray-300 text-gray-800';
+    const color = departmentConfig.eventTypeColors[firstType];
+    if (color) {
+      return `${color.bg} ${color.border} ${color.text}`;
+    }
+
+    return 'bg-gray-100 border-gray-300 text-gray-800';
   };
 
   const getEmployeeColor = (employeeId) => {
@@ -714,8 +717,8 @@ const FieldServiceCalendar = () => {
           </div>
 
           {/* Employee Rows */}
-          {filteredEmployees.map((employee) => {
-            const employeeEvents = getEventsForEmployee(employee.id);
+          {allDisplayEmployees.map((employee) => {
+            const employeeEvents = getEventsForEmployee(employee.id, employee.isCrossView);
 
             // Calculate row index for each event based on overlaps
             // and find max overlaps for height calculation
@@ -774,9 +777,12 @@ const FieldServiceCalendar = () => {
             const eventHeight = Math.floor((availableHeight - totalGaps) / maxRows);
 
             return (
-              <div key={employee.id} className="flex border-b hover:bg-gray-50">
-                <div className="w-40 flex-shrink-0 px-4 py-3 border-r bg-gray-50">
-                  <div className="font-semibold text-gray-900">{employee.name}</div>
+              <div key={`${employee.id}-${employee.isCrossView ? 'cross' : 'home'}`} className={`flex border-b hover:bg-gray-50 ${employee.isCrossView ? 'opacity-60' : ''}`}>
+                <div className={`w-40 flex-shrink-0 px-4 py-3 border-r ${employee.isCrossView ? 'bg-amber-50' : 'bg-gray-50'}`}>
+                  <div className="font-semibold text-gray-900">
+                    {employee.name}
+                    {employee.isCrossView && <span className="ml-1 text-xs text-amber-600">({otherDepartmentConfig?.label})</span>}
+                  </div>
                   <div className="text-xs text-gray-600">{employee.title}</div>
                 </div>
                 <div className="flex-1 relative" style={{ height: `${fixedRowHeight}px` }}>
@@ -891,8 +897,8 @@ const FieldServiceCalendar = () => {
           </div>
 
           {/* Employee Rows */}
-          {filteredEmployees.map((employee) => {
-            const employeeEvents = getEventsForEmployee(employee.id);
+          {allDisplayEmployees.map((employee) => {
+            const employeeEvents = getEventsForEmployee(employee.id, employee.isCrossView);
 
             const eventsWithSpanInfo = employeeEvents.map(event => ({
               ...event,
@@ -942,9 +948,12 @@ const FieldServiceCalendar = () => {
             const eventHeight = Math.floor((availableHeight - totalGaps) / maxRows);
 
             return (
-              <div key={employee.id} className="flex border-b hover:bg-gray-50">
-                <div className="w-36 flex-shrink-0 px-3 py-2 border-r bg-gray-50">
-                  <div className="font-semibold text-sm text-gray-900">{employee.name}</div>
+              <div key={`${employee.id}-${employee.isCrossView ? 'cross' : 'home'}`} className={`flex border-b hover:bg-gray-50 ${employee.isCrossView ? 'opacity-60' : ''}`}>
+                <div className={`w-36 flex-shrink-0 px-3 py-2 border-r ${employee.isCrossView ? 'bg-amber-50' : 'bg-gray-50'}`}>
+                  <div className="font-semibold text-sm text-gray-900">
+                    {employee.name}
+                    {employee.isCrossView && <span className="ml-1 text-xs text-amber-600">({otherDepartmentConfig?.label})</span>}
+                  </div>
                   <div className="text-xs text-gray-600 truncate">{employee.title}</div>
                 </div>
                 <div className="flex-1 relative" style={{ height: `${fixedRowHeight}px` }}>
@@ -988,61 +997,27 @@ const FieldServiceCalendar = () => {
             );
           })}
 
-          {/* Event Type Legend */}
+          {/* Event Type Legend — generated from config */}
           <div className="bg-gray-50 border-t p-3">
             <div className="flex flex-wrap gap-3 justify-center">
-              <div className="flex items-center gap-1.5">
-                <div className="w-4 h-4 rounded bg-blue-100 border border-blue-300" />
-                <span className="text-xs text-gray-700">Install</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <div className="w-4 h-4 rounded bg-green-100 border border-green-300" />
-                <span className="text-xs text-gray-700">PM</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <div className="w-4 h-4 rounded bg-yellow-100 border border-yellow-300" />
-                <span className="text-xs text-gray-700">Service Visit</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <div className="w-4 h-4 rounded bg-purple-100 border border-purple-300" />
-                <span className="text-xs text-gray-700">Software Upgrade</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <div className="w-4 h-4 rounded bg-cyan-100 border border-cyan-300" />
-                <span className="text-xs text-gray-700">PM + SW Upgrade</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <div className="w-4 h-4 rounded bg-red-100 border border-red-300" />
-                <span className="text-xs text-gray-700">De Install</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <div className="w-4 h-4 rounded bg-indigo-100 border border-indigo-300" />
-                <span className="text-xs text-gray-700">Acceptance Test</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <div className="w-4 h-4 rounded bg-teal-100 border border-teal-300" />
-                <span className="text-xs text-gray-700">Remote Service</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <div className="w-4 h-4 rounded bg-lime-100 border border-lime-300" />
-                <span className="text-xs text-gray-700">Site Visit</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <div className="w-4 h-4 rounded bg-slate-100 border border-slate-300" />
-                <span className="text-xs text-gray-700">No Travel</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <div className="w-4 h-4 rounded bg-sky-100 border border-sky-300" />
-                <span className="text-xs text-gray-700">Vacation</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <div className="w-4 h-4 rounded bg-orange-100 border border-orange-300" />
-                <span className="text-xs text-gray-700">First Line</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <div className="w-4 h-4 rounded bg-pink-100 border border-pink-300" />
-                <span className="text-xs text-gray-700">Custom</span>
-              </div>
+              {departmentConfig.eventTypes.map(type => {
+                const color = departmentConfig.eventTypeColors[type];
+                if (!color) return null;
+                return (
+                  <div key={type} className="flex items-center gap-1.5">
+                    <div className={`w-4 h-4 rounded ${color.bg} border ${color.border}`} />
+                    <span className="text-xs text-gray-700">{type}</span>
+                  </div>
+                );
+              })}
+              {/* Combo colors */}
+              {Object.entries(departmentConfig.comboColors).map(([key, color]) => (
+                <div key={key} className="flex items-center gap-1.5">
+                  <div className={`w-4 h-4 rounded ${color.bg} border ${color.border}`} />
+                  <span className="text-xs text-gray-700">{key.replace(/\+/g, ' + ')}</span>
+                </div>
+              ))}
+              {/* Tentative */}
               <div className="flex items-center gap-1.5">
                 <div className="w-4 h-4 rounded bg-gray-200 border border-gray-400 border-dashed" />
                 <span className="text-xs text-gray-700">Tentative</span>
@@ -1357,13 +1332,14 @@ const FieldServiceCalendar = () => {
         </div>
       ) : (
         // Mobile Week/Bi-Weekly - by employee
-        filteredEmployees.map((employee) => {
-          const employeeEvents = getEventsForEmployee(employee.id);
+        allDisplayEmployees.map((employee) => {
+          const employeeEvents = getEventsForEmployee(employee.id, employee.isCrossView);
 
           return (
-            <div key={employee.id} className="border-b last:border-b-0">
-              <div className="bg-gray-50 px-4 py-3 font-semibold text-gray-900">
+            <div key={`${employee.id}-${employee.isCrossView ? 'cross' : 'home'}`} className={`border-b last:border-b-0 ${employee.isCrossView ? 'opacity-60' : ''}`}>
+              <div className={`px-4 py-3 font-semibold text-gray-900 ${employee.isCrossView ? 'bg-amber-50' : 'bg-gray-50'}`}>
                 {employee.name}
+                {employee.isCrossView && <span className="ml-1 text-xs text-amber-600">({otherDepartmentConfig?.label})</span>}
                 <div className="text-xs text-gray-600 font-normal">{employee.title}</div>
               </div>
               {employeeEvents.length === 0 ? (
@@ -1404,8 +1380,11 @@ const FieldServiceCalendar = () => {
       <div className="max-w-[98%] mx-auto mb-2">
         <div className="bg-white rounded-lg shadow-sm p-1 md:p-2">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-1">
-            <div className="flex items-center">
+            <div className="flex items-center gap-4">
               <img src={import.meta.env.BASE_URL + "c_rad.png"} alt="C-rad Logo" className="h-32 w-auto -my-10" />
+              <div className="hidden md:block">
+                <span className="text-sm text-gray-500">{regionConfig.label} — {departmentConfig.label}</span>
+              </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
@@ -1432,6 +1411,16 @@ const FieldServiceCalendar = () => {
               >
                 <Filter className="w-4 h-4" />
                 Filters
+              </button>
+              <button
+                onClick={() => setCrossViewEnabled(!crossViewEnabled)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition ${
+                  crossViewEnabled
+                    ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                    : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
+                }`}
+              >
+                {crossViewEnabled ? `Hide ${otherDepartmentConfig?.label}` : `Show ${otherDepartmentConfig?.label}`}
               </button>
               <button
                 onClick={() => {
@@ -1518,7 +1507,7 @@ const FieldServiceCalendar = () => {
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 >
                   <option value="all">All Event Types</option>
-                  {EVENT_TYPES.map(type => (
+                  {departmentConfig.eventTypes.map(type => (
                     <option key={type} value={type}>{type}</option>
                   ))}
                 </select>
@@ -1646,7 +1635,7 @@ const FieldServiceCalendar = () => {
                     Event Type(s) *
                   </label>
                   <div className="grid grid-cols-3 gap-2">
-                    {EVENT_TYPES.map(type => (
+                    {departmentConfig.eventTypes.map(type => (
                       <label key={type} className="flex items-center space-x-2 cursor-pointer">
                         <input
                           type="checkbox"
@@ -1677,7 +1666,7 @@ const FieldServiceCalendar = () => {
                     Products
                   </label>
                   <div className="grid grid-cols-2 gap-2">
-                    {PRODUCTS.map(product => (
+                    {departmentConfig.products.map(product => (
                       <label key={product} className="flex items-center space-x-2 cursor-pointer">
                         <input
                           type="checkbox"

@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Firestore Migration - Add Region/Department Fields</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
+    h1 { color: #00384E; }
+    button { background: #00384E; color: white; padding: 15px 30px; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; margin: 10px 5px 10px 0; }
+    button:hover { background: #005a7a; }
+    button:disabled { background: #ccc; cursor: not-allowed; }
+    #log { background: #f5f5f5; padding: 20px; border-radius: 8px; margin-top: 20px; white-space: pre-wrap; font-family: monospace; max-height: 400px; overflow-y: auto; }
+    .success { color: green; }
+    .error { color: red; }
+    .warning { color: orange; }
+    .info { color: blue; }
+  </style>
+</head>
+<body>
+  <h1>Firestore Migration</h1>
+  <p>This script adds <code>region</code> and <code>department</code> fields to all existing employees and events.</p>
+  <p><strong>Default values:</strong> region = "americas", department = "field_service"</p>
+
+  <button id="previewBtn" onclick="previewMigration()">Preview Changes</button>
+  <button id="migrateBtn" onclick="runMigration()">Run Migration</button>
+
+  <div id="log"></div>
+
+  <script type="module">
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js';
+    import { getFirestore, collection, getDocs, updateDoc, doc } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js';
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyAg8fsL8Oeh7qB53RE2XdbHId9_kPy6UyE",
+      authDomain: "crad-calendar.firebaseapp.com",
+      projectId: "crad-calendar",
+      storageBucket: "crad-calendar.firebasestorage.app",
+      messagingSenderId: "46364456888",
+      appId: "1:46364456888:web:7c750d73938f1fecdc014d"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    const logDiv = document.getElementById('log');
+
+    function log(message, type = '') {
+      const span = document.createElement('span');
+      span.className = type;
+      span.textContent = message + '\n';
+      logDiv.appendChild(span);
+      logDiv.scrollTop = logDiv.scrollHeight;
+    }
+
+    function clearLog() {
+      logDiv.innerHTML = '';
+    }
+
+    window.previewMigration = async function() {
+      clearLog();
+      log('=== PREVIEW MODE (no changes will be made) ===', 'info');
+      log('');
+
+      try {
+        // Check employees
+        log('Checking employees collection...', 'info');
+        const empSnapshot = await getDocs(collection(db, 'employees'));
+        let empNeedsMigration = 0;
+        let empAlreadyMigrated = 0;
+
+        empSnapshot.forEach(docSnap => {
+          const data = docSnap.data();
+          if (!data.region || !data.department) {
+            empNeedsMigration++;
+            log(`  [NEEDS UPDATE] Employee: ${data.name || docSnap.id}`);
+          } else {
+            empAlreadyMigrated++;
+            log(`  [OK] Employee: ${data.name || docSnap.id} (${data.region}/${data.department})`, 'success');
+          }
+        });
+
+        log('');
+        log(`Employees: ${empNeedsMigration} need migration, ${empAlreadyMigrated} already done`, empNeedsMigration > 0 ? 'warning' : 'success');
+
+        // Check events
+        log('');
+        log('Checking events collection...', 'info');
+        const eventSnapshot = await getDocs(collection(db, 'events'));
+        let evtNeedsMigration = 0;
+        let evtAlreadyMigrated = 0;
+
+        eventSnapshot.forEach(docSnap => {
+          const data = docSnap.data();
+          if (!data.region || !data.department) {
+            evtNeedsMigration++;
+            log(`  [NEEDS UPDATE] Event: ${docSnap.id} (${data.customer || 'No customer'})`);
+          } else {
+            evtAlreadyMigrated++;
+          }
+        });
+
+        log('');
+        log(`Events: ${evtNeedsMigration} need migration, ${evtAlreadyMigrated} already done`, evtNeedsMigration > 0 ? 'warning' : 'success');
+
+        log('');
+        if (empNeedsMigration > 0 || evtNeedsMigration > 0) {
+          log('=== Click "Run Migration" to apply changes ===', 'warning');
+        } else {
+          log('=== All documents already migrated! ===', 'success');
+        }
+
+      } catch (error) {
+        log(`Error: ${error.message}`, 'error');
+        console.error(error);
+      }
+    };
+
+    window.runMigration = async function() {
+      clearLog();
+      log('=== RUNNING MIGRATION ===', 'info');
+      log('Adding region="americas" and department="field_service" to all documents...');
+      log('');
+
+      const migrateBtn = document.getElementById('migrateBtn');
+      const previewBtn = document.getElementById('previewBtn');
+      migrateBtn.disabled = true;
+      previewBtn.disabled = true;
+
+      try {
+        // Migrate employees
+        log('Migrating employees...', 'info');
+        const empSnapshot = await getDocs(collection(db, 'employees'));
+        let empUpdated = 0;
+        let empSkipped = 0;
+
+        for (const docSnap of empSnapshot.docs) {
+          const data = docSnap.data();
+          if (!data.region || !data.department) {
+            await updateDoc(doc(db, 'employees', docSnap.id), {
+              region: 'americas',
+              department: 'field_service'
+            });
+            empUpdated++;
+            log(`  Updated: ${data.name || docSnap.id}`, 'success');
+          } else {
+            empSkipped++;
+          }
+        }
+
+        log(`Employees: ${empUpdated} updated, ${empSkipped} skipped (already migrated)`, 'success');
+
+        // Migrate events
+        log('');
+        log('Migrating events...', 'info');
+        const eventSnapshot = await getDocs(collection(db, 'events'));
+        let evtUpdated = 0;
+        let evtSkipped = 0;
+
+        for (const docSnap of eventSnapshot.docs) {
+          const data = docSnap.data();
+          if (!data.region || !data.department) {
+            await updateDoc(doc(db, 'events', docSnap.id), {
+              region: 'americas',
+              department: 'field_service'
+            });
+            evtUpdated++;
+            log(`  Updated: Event ${docSnap.id}`, 'success');
+          } else {
+            evtSkipped++;
+          }
+        }
+
+        log(`Events: ${evtUpdated} updated, ${evtSkipped} skipped (already migrated)`, 'success');
+
+        log('');
+        log('=== MIGRATION COMPLETE ===', 'success');
+
+      } catch (error) {
+        log(`Error: ${error.message}`, 'error');
+        console.error(error);
+      } finally {
+        migrateBtn.disabled = false;
+        previewBtn.disabled = false;
+      }
+    };
+  </script>
+</body>
+</html>
