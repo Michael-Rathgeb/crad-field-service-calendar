@@ -1,6 +1,6 @@
 # CRAD Field Service Calendar - Changelog
 
-## Version 2.0.0 (In Progress - February 8, 2026)
+## Version 2.0.0 (February 8, 2026)
 
 ### Multi-Department Platform Expansion
 
@@ -69,11 +69,24 @@ This version transforms the single-purpose Field Service calendar into a multi-d
 - Separate Firestore listeners for cross-department data
 - `allDisplayEmployees` combines home + cross-view employees
 - `getEventsForEmployee()` accepts `isCrossView` parameter to fetch from correct event source
+- Edit/Delete buttons hidden for cross-department events (enforced via `event.department` check)
+- "View only" message displayed instead for cross-department events
 
-#### Phase 4: Vercel Deployment (PENDING)
-- Purchase domain (e.g., cradcalendar.com)
-- Deploy to Vercel with subdomains per department/region
-- Remove GitHub Pages deployment
+#### Phase 4: Vercel Deployment (COMPLETE)
+
+**Domain & Hosting:**
+- Purchased `cradcalendar.com` through Vercel
+- Vercel auto-manages DNS and SSL certificates
+
+**Deployment Setup:**
+- Two Vercel projects pointing to same GitHub repo
+- Field Service: `fs-americas.cradcalendar.com` (VITE_DEPARTMENT=field_service)
+- Clinical: `clinical-americas.cradcalendar.com` (VITE_DEPARTMENT=clinical)
+- Auto-deploys on push to master branch
+
+**Configuration Changes:**
+- Updated `vite.config.js` base path from `/crad-field-service-calendar/` to `/`
+- Environment variables set per-project in Vercel dashboard
 
 ---
 
