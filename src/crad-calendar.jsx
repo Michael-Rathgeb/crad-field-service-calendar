@@ -1821,23 +1821,32 @@ const FieldServiceCalendar = () => {
             </div>
 
             <div className="p-4 border-t flex gap-2">
-              <button
-                onClick={() => {
-                  if (window.confirm(`Delete "${getEventLabel(selectedEvent)}" event?`)) {
-                    handleDeleteEvent(selectedEvent.id);
-                    setSelectedEvent(null);
-                  }
-                }}
-                className="flex-1 bg-red-100 hover:bg-red-200 text-red-700 font-medium py-2 rounded-lg transition"
-              >
-                Delete
-              </button>
-              <button
-                onClick={() => handleEditEvent(selectedEvent)}
-                className="flex-1 bg-blue-100 hover:bg-blue-200 text-blue-700 font-medium py-2 rounded-lg transition"
-              >
-                Edit
-              </button>
+              {/* Only show Edit/Delete for events from this department */}
+              {selectedEvent.department === DEPARTMENT ? (
+                <>
+                  <button
+                    onClick={() => {
+                      if (window.confirm(`Delete "${getEventLabel(selectedEvent)}" event?`)) {
+                        handleDeleteEvent(selectedEvent.id);
+                        setSelectedEvent(null);
+                      }
+                    }}
+                    className="flex-1 bg-red-100 hover:bg-red-200 text-red-700 font-medium py-2 rounded-lg transition"
+                  >
+                    Delete
+                  </button>
+                  <button
+                    onClick={() => handleEditEvent(selectedEvent)}
+                    className="flex-1 bg-blue-100 hover:bg-blue-200 text-blue-700 font-medium py-2 rounded-lg transition"
+                  >
+                    Edit
+                  </button>
+                </>
+              ) : (
+                <div className="flex-1 text-center text-sm text-amber-600 py-2">
+                  View only — {otherDepartmentConfig?.label} event
+                </div>
+              )}
               <button
                 onClick={() => setSelectedEvent(null)}
                 className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium py-2 rounded-lg transition"
